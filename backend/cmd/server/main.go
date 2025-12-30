@@ -29,6 +29,9 @@ func main() {
 	// 店舗検索API
 	r.GET("/api/shops", shopHandler.Search)
 
+	// 店舗詳細API
+	r.GET("/api/shops/:id", shopHandler.GetByID)
+
 	// サーバー起動
 	r.Run(":" + cfg.Port)
 

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
+	"github.com/kazu-1024/geogour/backend/internal/errors"
 	"github.com/kazu-1024/geogour/backend/internal/model"
 )
 
@@ -33,8 +35,16 @@ type SearchParams struct {
 	Lat   float64
 	Lng   float64
 	Range int
+	Genre string
 	Start int
 	Count int
+}
+
+// 値が空でない場合のみクエリパラメータをセット
+func setIfNotEmpty(q url.Values, key, value string) {
+	if value != "" {
+		q.Set(key, value)
+	}
 }
 
 // 指定した条件で店舗を検索
@@ -51,21 +61,62 @@ func (c *HotPepperClient) Search(params SearchParams) (*model.HotPepperResponse,
 	q.Set("start", fmt.Sprintf("%d", params.Start))
 	q.Set("count", fmt.Sprintf("%d", params.Count))
 	q.Set("format", "json")
+
+	setIfNotEmpty(q, "genre", params.Genre)
+
 	u.RawQuery = q.Encode()
 
 	resp, err := c.client.Get(u.String())
 	if err != nil {
-		return nil, err
+		// タイムアウト判定
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
+			return nil, errors.NewTimeout("HotPepper APIへの接続がタイムアウトしました")
+		}
+		return nil, errors.NewExternalAPIError(err.Error())
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status code: %d", resp.StatusCode)
+		return nil, errors.NewExternalAPIError(fmt.Sprintf("HotPepper API returned status %d", resp.StatusCode))
 	}
 
 	var result model.HotPepperResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, errors.NewExternalAPIError("レスポンスの解析に失敗しました")
+	}
+
+	return &result, nil
+}
+
+// IDで店舗を取得
+func (c *HotPepperClient) GetByID(id string) (*model.HotPepperResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, errors.NewInternalError("URL解析エラー")
+	}
+	q := u.Query()
+	q.Set("key", c.apiKey)
+	q.Set("id", id)
+	q.Set("format", "json")
+
+	u.RawQuery = q.Encode()
+
+	resp, err := c.client.Get(u.String())
+	if err != nil {
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
+			return nil, errors.NewTimeout("HotPepper APIへの接続がタイムアウトしました")
+		}
+		return nil, errors.NewExternalAPIError(err.Error())
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.NewExternalAPIError(fmt.Sprintf("HotPepper API returned status %d", resp.StatusCode))
+	}
+
+	var result model.HotPepperResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.NewExternalAPIError("レスポンスの解析に失敗しました")
 	}
 
 	return &result, nil
